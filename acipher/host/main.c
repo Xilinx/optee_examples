@@ -19,9 +19,6 @@
 #define ENCRYPT         1
 #define DECRYPT         0
 
-/* Probe buffer length for the decrypt size-query. */
-#define DEC_OUT_SIZE_PROBE_LEN	8
-
 static void usage(int argc, char *argv[])
 {
 	const char *pname = argv[0];
@@ -176,30 +173,14 @@ int main(int argc, char *argv[])
 	op.params[2].value.a = DECRYPT; /* decrypt */
 	op.params[3].value.a = algo_num;
 
-	/*
-	 * PKCS#11 allows querying the required size by passing a zero-sized output
-	 * buffer. Decrypt path in crypto_api crypto_acipher_rsaes_decrypt()
-	 * rejects NULL output pointer with TEE_ERROR_BAD_PARAMETERS before driver
-	 * can compute and return the required size. So pass a valid (non-NULL)
-	 * pointer with size 0 to get the required size in params[1].tmpref.size.
-	 */
-	op.params[1].tmpref.buffer = malloc(DEC_OUT_SIZE_PROBE_LEN);
-	if (!op.params[1].tmpref.buffer)
-		err(1, "Cannot allocate probe buffer");
-	op.params[1].tmpref.size = 0;
-
 	res = TEEC_InvokeCommand(&sess, TA_ACIPHER_CMD_ENCRYPT_DECRYPT, &op, &eo);
-	if (res == TEEC_ERROR_SHORT_BUFFER &&
-	    eo == TEEC_ORIGIN_TRUSTED_APP) {
-		free(op.params[1].tmpref.buffer);
-		op.params[1].tmpref.buffer = malloc(op.params[1].tmpref.size);
-		if (!op.params[1].tmpref.buffer)
-			err(1, "Cannot allocate out buffer of size %zu",
-			    op.params[1].tmpref.size);
-	} else {
-		free(op.params[1].tmpref.buffer);
-		teec_err(res, eo, "Command TA_ACIPHER_CMD_ENCRYPT_DECRYPT failed to get decrypted size");
-	}
+	if (eo != TEEC_ORIGIN_TRUSTED_APP || res != TEEC_ERROR_SHORT_BUFFER)
+		teec_err(res, eo, "Command TA_ACIPHER_CMD_ENCRYPT_DECRYPT failed for decryption");
+
+	op.params[1].tmpref.buffer = malloc(op.params[1].tmpref.size);
+	if (!op.params[1].tmpref.buffer)
+		err(1, "Cannot allocate out buffer of size %zu",
+		    outbuf_len);
 
 	res = TEEC_InvokeCommand(&sess, TA_ACIPHER_CMD_ENCRYPT_DECRYPT, &op, &eo);
 	if (res)
